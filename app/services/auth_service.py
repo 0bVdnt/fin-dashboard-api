@@ -75,7 +75,7 @@ class AuthService:
             raise UnauthorizedError("Invalid email or password")
 
         # Verify password
-        if not verify_password(data.passsword, user.password_hash):
+        if not verify_password(data.password, user.password_hash):
             raise UnauthorizedError("Invalid email or password")
 
         # Check account status

@@ -48,7 +48,7 @@ class LoginRequest(BaseModel):
     """Schema for user login"""
 
     email: EmailStr
-    passsword: str
+    password: str
 
     model_config = {"extra": "forbid"}
 

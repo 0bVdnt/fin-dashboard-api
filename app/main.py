@@ -4,7 +4,7 @@ from fastapi import FastAPI
 
 from app.config import get_settings
 from app.errors.handlers import register_error_handlers
-from app.routers import health
+from app.routers import auth, health
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -31,6 +31,7 @@ def create_app() -> FastAPI:
 
     # Register routers
     app.include_router(health.router, prefix="/api/v1")
+    app.include_router(auth.router, prefix="/api/v1")
 
     logger.info(f"Applications '{settings.APP_NAME}' initialized")
     return app
