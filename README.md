@@ -1,119 +1,204 @@
-# Personal Finance Dashboard Backend
+# Finance Data Processing and Access Control Backend
 
-A robust, type-safe API built with **FastAPI** for managing financial records and generating dashboard analytics.
+![Python](https://img.shields.io/badge/Python-3.12+-3776AB?style=for-the-badge&logo=python&logoColor=white)
+![FastAPI](https://img.shields.io/badge/FastAPI-0.115+-009688?style=for-the-badge&logo=fastapi&logoColor=white)
+![PostgreSQL](https://img.shields.io/badge/PostgreSQL-18-4169E1?style=for-the-badge&logo=postgresql&logoColor=white)
+![SQLAlchemy](https://img.shields.io/badge/SQLAlchemy-2.0-D71F00?style=for-the-badge&logo=sqlalchemy&logoColor=white)
+![License](https://img.shields.io/badge/License-MIT-green?style=for-the-badge)
+
+> A production-grade, async REST API for financial data processing with role-based access control, dashboard analytics, and exact monetary precision.
+
+---
+
+## Feature Highlights
+
+| Feature | Details |
+|---------|---------|
+| **Authentication** | Stateless JWT with bcrypt password hashing |
+| **RBAC** | Three-tier roles — Viewer, Analyst, Admin |
+| **Exact Precision** | Integer-cents storage with Decimal API boundaries |
+| **Dashboard Analytics** | Income/expense totals, category breakdown, monthly trends |
+| **Search** | Case-insensitive ILIKE across descriptions and categories |
+| **Soft Delete** | Records are marked, never destroyed |
+| **Rate Limiting** | 100 requests/minute per IP via SlowAPI |
+| **Pagination** | Cursor-based with total counts and page metadata |
+| **Tested** | Unit + integration tests with Pytest |
+
+---
 
 ## Tech Stack
-- **Framework:** FastAPI
-- **Database:** PostgreSQL (with Asyncpg driver)
-- **ORM:** SQLAlchemy (Async)
-- **Migrations:** Alembic
-- **Testing:** Pytest & HTTPx
-- **Authentication:** JWT (Python-JOSE) with Bcrypt password hashing
+
+| Layer | Technology |
+|-------|------------|
+| Framework | [FastAPI](https://fastapi.tiangolo.com/) — async, type-safe, auto-documented |
+| Database | [PostgreSQL](https://www.postgresql.org/) via [asyncpg](https://github.com/MagicStack/asyncpg) |
+| ORM | [SQLAlchemy 2.0](https://www.sqlalchemy.org/) (async mapped columns) |
+| Migrations | [Alembic](https://alembic.sqlalchemy.org/) |
+| Auth | [python-jose](https://github.com/mpdavis/python-jose) (JWT) + [bcrypt](https://github.com/pyca/bcrypt) |
+| Validation | [Pydantic v2](https://docs.pydantic.dev/) with strict field constraints |
+| Rate Limiting | [SlowAPI](https://github.com/laurentS/slowapi) |
+| Testing | [Pytest](https://docs.pytest.org/) + [HTTPx](https://www.python-httpx.org/) |
+
+---
 
 ## Architecture & Design Decisions
 
-### 1. Robust Currency Storage
-Floating point calculations often lead to precision errors (e.g., `0.1 + 0.2 = 0.30000000000000004`). 
-To prevent monetary loss or inaccuracies, the backend enforces the following standard:
-- **Database Layer**: All monetary amounts are stored as integers (`cents`).
-- **Application Layer**: Business logic correctly aggregates using integer/cents arithmetic.
-- **REST API Layer**: Uses Python's exact `Decimal` module at the JSON boundaries to automatically format values into proper real-world constraints (e.g., `$10.50`), validated strictly to `max 2 decimal places`.
+### 1. Integer-Cents Monetary Storage
 
-### 2. Role-Based Access Control (RBAC) & Data Scoping
-To satisfy strict multi-tenant access:
-- **Admins** have unimpeded access to list, view, edit, or soft-delete any user's records.
-- **Viewers & Analysts** are restricted entirely to interacting with data tied to their own authenticated user ID. Any `GET` or aggregation request isolates their data efficiently at the repository SQL layer using `WHERE user_id = :id`.
-- System operations such as modifying user roles or record destruction are guarded by strict access control scopes configured securely via an injectable generic FastAPI Dependency (`RequireRole`).
+> **Problem**: Floating-point arithmetic causes silent rounding errors in financial calculations.
+> `0.1 + 0.2 = 0.30000000000000004`
 
-### 3. Safety-First Deletion
-Soft deletion using a boolean `is_deleted` column prevents catastrophic data loss metrics and acts as an audit log. Active records are globally filtered automatically without compromising original references.
+**Solution**: A three-layer precision pipeline that eliminates floating-point entirely:
 
-### 4. Advanced Enhancements (Full Coverage)
-This backend implements **all** Optional Requirements suggested in the assignment parameters:
-- **Authentication:** JWT scoping via custom middlewares.
-- **Pagination:** Strict standard pagination limits enforcing `offset` and `limit`.
-- **Search Support:** ILIKE queries exposed natively routing through `%search%` parameters.
-- **Soft Delete:** `is_deleted` handling across the entire app.
-- **Rate Limiting:** Globally deployed `slowapi` rate limits capping to 100 req/minute to stop abuse.
-- **Tests:** Custom Pytests guaranteeing endpoint resolutions, math precision limits, and application health logic.
+```
+API Input (Decimal)  →  Service Layer (× 100)  →  Database (Integer cents)
+   "5000.50"                500050                     500050
+                                                         ↓
+API Output (Decimal) ←  Schema Layer (÷ 100)  ←  Database (Integer cents)
+   "5000.50"                500050                     500050
+```
+
+- **Input**: Pydantic validates `Decimal` with `@field_validator` enforcing ≤ 2 decimal places
+- **Storage**: PostgreSQL `BIGINT` column — no rounding, no precision loss, no locale issues
+- **Output**: `cents_to_dollars()` utility converts back using exact `Decimal` arithmetic
+- **Bonus**: PostgreSQL `CHECK(amount > 0)` constraint acts as a database-level guard rail
+
+### 2. Role-Based Access Control (RBAC)
+
+Three roles with escalating privileges, enforced at two levels:
+
+```
+Viewer    →  View own records, own dashboard
+Analyst   →  View own records, own dashboard, access insights
+Admin     →  Full CRUD on all records, global dashboard, user management
+```
+
+**Implementation**: A reusable `RequireRole` dependency injected into route handlers:
+```python
+@router.post("/records/")
+async def create_record(
+    user: User = Depends(RequireRole(Role.ADMIN)),  # ← Enforced here
+):
+```
+
+**Data scoping** happens at the repository layer — non-admins automatically get a `WHERE user_id = :id` filter applied to every query. This means access control is enforced at the SQL level, not just the API level.
+
+### 3. Safety-First Soft Deletion
+
+Records are never physically deleted. A boolean `is_deleted` flag is set, and all queries automatically filter with `WHERE is_deleted IS FALSE`. This provides:
+- **Audit trail** — historical data is always recoverable
+- **Referential integrity** — no orphaned foreign keys
+- **Compliance readiness** — financial data retention requirements
+
+### 4. Layered Architecture
+
+```
+Router  →  Service  →  Repository  →  Database
+  ↑          ↑            ↑
+Schema    Business     Raw SQL
+Validation  Logic      Queries
+```
+
+Each layer has a single responsibility:
+- **Routers**: HTTP concerns only (status codes, query params, response wrapping)
+- **Services**: Business rules, access control, data transformation
+- **Repositories**: Pure data access — no business logic, easily testable/mockable
 
 ---
 
 ## Local Development & Setup
 
-This repository uses local `Docker` and a `Makefile` to orchestrate setups.
-A `.env.example` file is provided. Rename it to `.env` if custom configurations are needed. (Standard defaults will connect successfully on localhost).
+### Prerequisites
+- Python 3.12+
+- Docker & Docker Compose
+- Make (optional, for convenience commands)
 
-### 1. Setup Virtual Environment
+### 1. Clone & Setup
 ```bash
+git clone https://github.com/0bVdnt/fin-dashboard-api.git
+cd fin-dashboard-api
 python -m venv venv
 source venv/bin/activate
 pip install -r requirements.txt
 ```
 
-### 2. Start Services
-Ensure Docker is installed, then build and mount the database system:
+### 2. Start PostgreSQL
 ```bash
-make docker-up
+docker-compose up -d
 ```
 
 ### 3. Run Migrations
-Run Alembic upgrades to deploy the exact database schemas onto the running container:
 ```bash
 alembic upgrade head
 ```
 
-### 4. Run the API Server
+### 4. Start the Server
 ```bash
-make run
+uvicorn app.main:app --reload
 ```
-Access the Swagger documentation via `http://localhost:8000/docs`.
+
+**Swagger UI** → [http://localhost:8000/docs](http://localhost:8000/docs)
+**ReDoc** → [http://localhost:8000/redoc](http://localhost:8000/redoc)
 
 ### 5. Run Tests
-The test suite spans schemas, service logic functions, and database assertions.
 ```bash
-make test
+pytest -v
 ```
 
 ---
 
 ## API Endpoints
 
-Interactive Swagger docs are available at `http://localhost:8000/docs` when the server is running.
-
 ### Authentication
 | Method | Endpoint | Auth | Description |
 |--------|----------|------|-------------|
-| POST | `/api/v1/auth/register` | — | Register a new user (default role: viewer) |
-| POST | `/api/v1/auth/login` | — | Login and receive a JWT token |
-| GET | `/api/v1/auth/me` | Bearer | Get the current authenticated user |
+| `POST` | `/api/v1/auth/register` | — | Register a new user (default: viewer) |
+| `POST` | `/api/v1/auth/login` | — | Login and receive JWT |
+| `GET` | `/api/v1/auth/me` |  | Get current user profile |
 
-### User Management (Admin only)
+### User Management *(Admin only)*
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| GET | `/api/v1/users/` | List all users (filterable by role, status) |
-| GET | `/api/v1/users/{id}` | Get a user by ID |
-| PATCH | `/api/v1/users/{id}/role` | Change a user's role |
-| PATCH | `/api/v1/users/{id}/status` | Activate or deactivate a user |
+| `GET` | `/api/v1/users/` | List users (filter by role, status) |
+| `GET` | `/api/v1/users/{id}` | Get user by ID |
+| `PATCH` | `/api/v1/users/{id}/role` | Change user role |
+| `PATCH` | `/api/v1/users/{id}/status` | Activate / deactivate user |
 
 ### Financial Records
 | Method | Endpoint | Roles | Description |
 |--------|----------|-------|-------------|
-| POST | `/api/v1/records/` | Admin | Create a financial record |
-| GET | `/api/v1/records/` | All | List records (paginated, filterable, searchable) |
-| GET | `/api/v1/records/{id}` | All | Get a single record by ID |
-| PATCH | `/api/v1/records/{id}` | Admin | Partially update a record |
-| DELETE | `/api/v1/records/{id}` | Admin | Soft-delete a record |
+| `POST` | `/api/v1/records/` | Admin | Create income/expense record |
+| `GET` | `/api/v1/records/` | All | List records (paginated, filterable, searchable) |
+| `GET` | `/api/v1/records/{id}` | All | Get single record |
+| `PATCH` | `/api/v1/records/{id}` | Admin | Partial update |
+| `DELETE` | `/api/v1/records/{id}` | Admin | Soft-delete |
+
+**Query Parameters** for `GET /records/`:
+| Param | Type | Example | Description |
+|-------|------|---------|-------------|
+| `type` | string | `income` | Filter by `income` or `expense` |
+| `category` | string | `Salary` | Exact category match |
+| `search` | string | `April` | ILIKE search on description & category |
+| `date_from` | date | `2026-01-01` | Start date (inclusive) |
+| `date_to` | date | `2026-12-31` | End date (inclusive) |
+| `page` | int | `1` | Page number |
+| `per_page` | int | `20` | Items per page (max 100) |
 
 ### Dashboard
 | Method | Endpoint | Roles | Description |
 |--------|----------|-------|-------------|
-| GET | `/api/v1/dashboard/summary` | All | Aggregated summary (income, expenses, trends) |
+| `GET` | `/api/v1/dashboard/summary` | All | Full analytics summary |
+
+**Response includes:**
+- Total income, expenses, net balance
+- Expense breakdown by category
+- Monthly income vs. expense trends
+- 5 most recent transactions
 
 ### System
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| GET | `/api/v1/health` | Health check (includes database connectivity) |
+| `GET` | `/api/v1/health` | Health check with DB connectivity status |
 
 ---
 
@@ -121,44 +206,84 @@ Interactive Swagger docs are available at `http://localhost:8000/docs` when the 
 
 ```
 app/
-├── config.py                  # Environment and application settings
-├── database.py                # Async SQLAlchemy engine and session factory
-├── main.py                    # FastAPI application factory
+├── config.py                     # Environment settings (Pydantic BaseSettings)
+├── database.py                   # Async engine, session factory, get_db dependency
+├── main.py                       # Application factory with middleware registration
+│
 ├── core/
-│   ├── jwt.py                 # JWT token creation and decoding
-│   └── security.py            # Bcrypt password hashing and verification
+│   ├── jwt.py                    # JWT creation and decoding
+│   └── security.py               # Bcrypt password hashing
+│
 ├── errors/
-│   ├── exceptions.py          # Custom exception hierarchy
-│   └── handlers.py            # Global exception handlers
+│   ├── exceptions.py             # AppException → NotFound, Forbidden, Conflict, etc.
+│   └── handlers.py               # Global exception → JSON response handlers
+│
 ├── middleware/
-│   ├── auth.py                # JWT authentication dependency
-│   └── rbac.py                # Role-based access control dependency
+│   ├── auth.py                   # get_current_user dependency (JWT → User)
+│   └── rbac.py                   # RequireRole dependency (role enforcement)
+│
 ├── models/
-│   ├── user.py                # User ORM model
-│   └── record.py              # FinancialRecord ORM model
+│   ├── user.py                   # User model (roles, status, timestamps)
+│   └── record.py                 # FinancialRecord model (cents, soft-delete)
+│
 ├── repositories/
-│   ├── user_repository.py     # User data access layer
-│   ├── record_repository.py   # Record data access layer
-│   └── dashboard_repository.py# Dashboard aggregation queries
+│   ├── user_repository.py        # User CRUD + listing with filters
+│   ├── record_repository.py      # Record CRUD + search + pagination
+│   └── dashboard_repository.py   # Aggregation queries (SUM, GROUP BY)
+│
 ├── routers/
-│   ├── auth.py                # Authentication endpoints
-│   ├── users.py               # User management endpoints
-│   ├── records.py             # Financial record endpoints
-│   ├── dashboard.py           # Dashboard summary endpoint
-│   └── health.py              # Health check endpoint
+│   ├── auth.py                   # /auth/register, /auth/login, /auth/me
+│   ├── users.py                  # /users/ (admin management)
+│   ├── records.py                # /records/ (CRUD + search)
+│   ├── dashboard.py              # /dashboard/summary
+│   └── health.py                 # /health
+│
 ├── schemas/
-│   ├── common.py              # Shared response envelope (ApiResponse, Meta)
-│   ├── user.py                # User request/response schemas
-│   ├── record.py              # Record request/response schemas
-│   └── dashboard.py           # Dashboard response schemas
+│   ├── common.py                 # ApiResponse[T], Meta, ErrorDetail
+│   ├── user.py                   # Role enum, Register/Login/Token schemas
+│   ├── record.py                 # Create/Update/Response + RecordType enum
+│   └── dashboard.py              # Summary, CategoryTotal, TrendData
+│
+├── services/
+│   ├── auth_service.py           # Register, login, token generation
+│   ├── user_service.py           # Role/status updates with business rules
+│   ├── record_service.py         # Record CRUD with RBAC + cent conversion
+│   └── dashboard_service.py      # Aggregation orchestration
+│
 └── utils/
-    └── money.py               # Centralized currency conversion utilities
+    └── money.py                  # dollars_to_cents(), cents_to_dollars()
 ```
+
+---
 
 ## Assumptions & Tradeoffs
 
-- **New users default to the `viewer` role.** Admin accounts must be promoted by an existing admin via `PATCH /users/{id}/role`.
-- **Amounts in API requests are Decimal strings** (e.g., `5000.50`), validated to max 2 decimal places. Internally stored as integer cents to guarantee precision.
-- **Soft-delete is used over hard-delete** to preserve data integrity and enable future audit/recovery features.
-- **Rate limiting is global** (100 req/min per IP) rather than per-endpoint, keeping the implementation simple while still preventing abuse.
-- **JWT tokens encode the user's role at issuance time.** On each request, the user is re-fetched from the database to ensure role/status changes take effect immediately.
+### Design Choices
+
+| Decision | Rationale | Tradeoff |
+|----------|-----------|----------|
+| **Integer cents storage** | Eliminates all floating-point precision bugs | Requires conversion at API boundaries; amounts limited to 2 decimal places |
+| **Soft delete over hard delete** | Preserves audit trail and allows recovery | Increases storage over time; queries must always filter `is_deleted` |
+| **JWT with DB re-fetch** | Role/status changes take effect immediately | Adds one DB query per authenticated request (mitigated by connection pooling) |
+| **Global rate limiting** | Simple to implement and reason about | Doesn't allow endpoint-specific rate policies (e.g., stricter on `/auth/login`) |
+| **Sync Alembic with async app** | Alembic's migration runner is inherently synchronous | Requires `run_async()` bridge in `env.py`; no impact on runtime performance |
+| **Viewer as default role** | Principle of least privilege — safest default | Requires admin intervention to promote users; no self-service role escalation |
+
+### Security Considerations
+
+- **Password hashing**: bcrypt with automatic salt generation (12 rounds)
+- **JWT secrets**: Configurable via environment variables; defaults are for development only
+- **Email enumeration prevention**: Login returns identical errors for "user not found" and "wrong password"
+- **Self-modification guards**: Admins cannot change their own role or deactivate themselves (prevents lockout)
+- **Input validation**: Pydantic `model_config = {"extra": "forbid"}` rejects unknown fields
+
+### What I'd Add With More Time
+
+- **Refresh tokens** — Currently only short-lived access tokens; a refresh token flow would improve UX
+- **Email verification** — Validate email ownership before activating accounts
+- **Caching** — Redis-backed caching for dashboard aggregations (they're read-heavy)
+- **Structured logging** — JSON logging with correlation IDs for observability
+- **CI/CD** — GitHub Actions pipeline for lint + test + Docker build
+- **Export** — CSV/PDF export of financial records and reports
+
+---
