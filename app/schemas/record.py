@@ -5,6 +5,8 @@ from uuid import UUID
 
 from pydantic import BaseModel, Field, field_validator
 
+from app.utils.money import cents_to_dollars
+
 
 class RecordType(str, Enum):
     """Type of financial entry."""
@@ -108,7 +110,7 @@ class RecordResponse(BaseModel):
             user_id=record.user_id,
             type=record.type,
             category=record.category,
-            amount=Decimal(record.amount) / Decimal(100),
+            amount=cents_to_dollars(record.amount),
             description=record.description,
             date=record.date,
             created_at=record.created_at,
@@ -126,6 +128,9 @@ class RecordListParams(BaseModel):
 
     type: RecordType | None = None
     category: str | None = None
+    search: str | None = Field(
+        None, description="Search term for description or category"
+    )
     date_from: dt.date | None = None
     date_to: dt.date | None = None
     page: int = Field(1, ge=1)

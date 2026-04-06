@@ -1,7 +1,7 @@
 from datetime import date
 from uuid import UUID
 
-from sqlalchemy import and_, func, select, update
+from sqlalchemy import and_, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.record import FinancialRecord
@@ -61,6 +61,7 @@ class RecordRepository:
         user_id: UUID | None = None,
         type: str | None = None,
         category: str | None = None,
+        search: str | None = None,
         date_from: date | None = None,
         date_to: date | None = None,
         limit: int = 20,
@@ -78,6 +79,14 @@ class RecordRepository:
             conditions.append(FinancialRecord.type == type)
         if category is not None:
             conditions.append(FinancialRecord.category == category)
+        if search is not None:
+            search_term = f"%{search}%"
+            conditions.append(
+                or_(
+                    FinancialRecord.category.ilike(search_term),
+                    FinancialRecord.description.ilike(search_term),
+                )
+            )
         if date_from is not None:
             conditions.append(FinancialRecord.date >= date_from)
         if date_to is not None:

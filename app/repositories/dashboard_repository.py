@@ -27,7 +27,9 @@ class DashboardRepository:
         rows = result.all()
         return {str(r[0]): int(r[1]) if r[1] else 0 for r in rows}
 
-    async def get_category_breakdown(self, user_id: UUID | None = None) -> list[tuple[str, int]]:
+    async def get_category_breakdown(
+        self, user_id: UUID | None = None
+    ) -> list[tuple[str, int]]:
         """Return total expense amounts grouped by category."""
         conditions: list = [
             FinancialRecord.is_deleted.is_(False),
@@ -45,7 +47,9 @@ class DashboardRepository:
         result = await self.db.execute(query)
         return [(str(r[0]), int(r[1]) if r[1] else 0) for r in result.all()]
 
-    async def get_monthly_trends(self, user_id: UUID | None = None) -> list[tuple[str, str, int]]:
+    async def get_monthly_trends(
+        self, user_id: UUID | None = None
+    ) -> list[tuple[str, str, int]]:
         """
         Return income and expense totals grouped by month.
         Format of returned tuples: (YYYY-MM, type, amount)
@@ -56,7 +60,7 @@ class DashboardRepository:
 
         # func.to_char converts the date to 'YYYY-MM' format in PostgreSQL
         month_label = func.to_char(FinancialRecord.date, "YYYY-MM").label("month")
-        
+
         query = (
             select(month_label, FinancialRecord.type, func.sum(FinancialRecord.amount))
             .where(and_(*conditions))

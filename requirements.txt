@@ -8,6 +8,7 @@ alembic
 python-jose[cryptography]
 bcrypt
 python-multipart
+slowapi
 httpx
 pytest
 pytest-asyncio

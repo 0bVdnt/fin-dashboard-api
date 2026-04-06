@@ -1,5 +1,4 @@
 from collections import defaultdict
-from decimal import Decimal
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -13,6 +12,7 @@ from app.schemas.dashboard import (
 )
 from app.schemas.record import RecordResponse, RecordType
 from app.schemas.user import Role
+from app.utils.money import cents_to_dollars
 
 
 class DashboardService:
@@ -20,11 +20,6 @@ class DashboardService:
 
     def __init__(self, db: AsyncSession):
         self.repo = DashboardRepository(db)
-
-    @staticmethod
-    def _cents_to_dollars(cents: int) -> Decimal:
-        """Convert cents securely back to fractional Decimal dollars."""
-        return Decimal(cents) / Decimal(100)
 
     async def get_dashboard_data(self, current_user: User) -> DashboardResponse:
         """
@@ -41,15 +36,15 @@ class DashboardService:
         net_cents = income_cents - expense_cents
 
         summary = DashboardSummary(
-            total_income=self._cents_to_dollars(income_cents),
-            total_expenses=self._cents_to_dollars(expense_cents),
-            net_balance=self._cents_to_dollars(net_cents),
+            total_income=cents_to_dollars(income_cents),
+            total_expenses=cents_to_dollars(expense_cents),
+            net_balance=cents_to_dollars(net_cents),
         )
 
         # 2. Category Breakdown (Expenses only)
         categories = await self.repo.get_category_breakdown(user_id)
         category_breakdown = [
-            CategoryTotal(category=cat, total=self._cents_to_dollars(amount))
+            CategoryTotal(category=cat, total=cents_to_dollars(amount))
             for cat, amount in categories
         ]
 
@@ -66,8 +61,8 @@ class DashboardService:
         trends = [
             TrendData(
                 period=month,
-                income=self._cents_to_dollars(data["income"]),
-                expense=self._cents_to_dollars(data["expense"]),
+                income=cents_to_dollars(data["income"]),
+                expense=cents_to_dollars(data["expense"]),
             )
             for month, data in sorted(trends_map.items())
         ]

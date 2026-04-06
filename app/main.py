@@ -1,6 +1,10 @@
 import logging
 
 from fastapi import FastAPI
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
+from slowapi.middleware import SlowAPIMiddleware
+from slowapi.util import get_remote_address
 
 from app.config import get_settings
 from app.errors.handlers import register_error_handlers
@@ -29,6 +33,12 @@ def create_app() -> FastAPI:
     # Register global error handlers
     register_error_handlers(app)
 
+    # Setup rate limiting (100 requests per minute globally)
+    limiter = Limiter(key_func=get_remote_address, default_limits=["100/minute"])
+    app.state.limiter = limiter
+    app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+    app.add_middleware(SlowAPIMiddleware)
+
     # Register routers
     app.include_router(health.router, prefix="/api/v1")
     app.include_router(auth.router, prefix="/api/v1")
@@ -41,4 +51,3 @@ def create_app() -> FastAPI:
 
 
 app = create_app()
-

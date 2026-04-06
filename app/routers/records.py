@@ -57,6 +57,9 @@ async def create_record(
 async def list_records(
     type: RecordType | None = Query(None, description="Filter by record type"),
     category: str | None = Query(None, description="Filter by category"),
+    search: str | None = Query(
+        None, description="Search term for description or category"
+    ),
     date_from: dt.date | None = Query(None, description="Start date (inclusive)"),
     date_to: dt.date | None = Query(None, description="End date (inclusive)"),
     page: int = Query(1, ge=1, description="Page number"),
@@ -67,6 +70,7 @@ async def list_records(
     params = RecordListParams(
         type=type,
         category=category,
+        search=search,
         date_from=date_from,
         date_to=date_to,
         page=page,

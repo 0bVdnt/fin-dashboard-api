@@ -1,5 +1,4 @@
 import logging
-from decimal import Decimal
 from uuid import UUID
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -14,6 +13,7 @@ from app.schemas.record import (
     UpdateRecordRequest,
 )
 from app.schemas.user import Role
+from app.utils.money import dollars_to_cents
 
 logger = logging.getLogger(__name__)
 
@@ -23,16 +23,6 @@ class RecordService:
 
     def __init__(self, db: AsyncSession):
         self.record_repo = RecordRepository(db)
-
-    @staticmethod
-    def _dollars_to_cents(amount: Decimal) -> int:
-        """
-        Convert a currency amount to cents using exact Decimal arithmetic.
-
-        Decimal('1500.50') * 100  ->  Decimal('150050')  ->  int 150050
-        No floating-point involved at any step.
-        """
-        return int(amount * 100)
 
     async def create_record(
         self, data: CreateRecordRequest, current_user: User
@@ -47,7 +37,7 @@ class RecordService:
             user_id=current_user.id,
             type=data.type.value,
             category=data.category,
-            amount=self._dollars_to_cents(data.amount),
+            amount=dollars_to_cents(data.amount),
             record_date=data.date,
             description=data.description,
         )
@@ -91,6 +81,7 @@ class RecordService:
             user_id=user_id,
             type=type_value,
             category=params.category,
+            search=params.search,
             date_from=params.date_from,
             date_to=params.date_to,
             limit=params.per_page,
@@ -122,7 +113,7 @@ class RecordService:
         if data.category is not None:
             update_fields["category"] = data.category
         if data.amount is not None:
-            update_fields["amount"] = self._dollars_to_cents(data.amount)
+            update_fields["amount"] = dollars_to_cents(data.amount)
         if data.description is not None:
             update_fields["description"] = data.description
         if data.date is not None:
